@@ -20,7 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment
+# Virtual Environment
 .env
 .venv
 env/
@@ -33,13 +33,24 @@ ENV/
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
 # Project specific
-credentials/*.json
+output_speech.mp3
 *.mp3
 *.wav
-logs/
-output/ 
+google_creds.json
+aimakers_cred.json
+creds_base64.txt
+
+# Logs
+*.log
+*.html
+news_agent_log.html
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 

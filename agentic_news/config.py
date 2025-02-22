@@ -1,88 +1,50 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # API Keys
-EXA_API_KEY = os.environ.get('EXA_API_KEY')
-ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY')
-MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
+EXA_API_KEY = os.getenv('EXA_API_KEY')
+ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
+MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
 
-# Service URLs
+# Cloud Storage
+GCS_BUCKET_NAME = os.getenv('GCS_BUCKET_NAME', 'aimakers-workspace')
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 
-# Storage
-GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME')
-
 # Function definitions for the agent
-FUNCTION_DEFINITIONS = [
-    {
-        "name": "get_preferences",
-        "description": "Get user preferences for news categories and voice settings",
-        "parameters": {
-            "type": "object",
-            "properties": {}
+FUNCTION_DEFINITIONS = {
+    "get_preferences": {
+        "description": "Fetch user preferences from storage.",
+        "params": {}
+    },
+    "fetch_and_summarize": {
+        "description": "Fetch news articles using user preferences and generate summaries in one pass.",
+        "params": {
+            "preferences": "User preferences dictionary",
+            "model": "Optional: LLM model to use for generation (default: mistral/mistral-small-latest)"
         }
     },
-    {
-        "name": "fetch_and_summarize",
-        "description": "Fetch and summarize news articles based on preferences",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "preferences": {
-                    "type": "object",
-                    "description": "User preferences including categories and date range"
-                }
-            },
-            "required": ["preferences"]
+    "generate_news_script": {
+        "description": "Create a natural, conversational news brief from summarized articles.",
+        "params": {
+            "summarized_results": "List of categories with summarized articles",
+            "preferences": "User preferences dictionary",
+            "model": "Optional: LLM model to use (default: mistral/mistral-small-latest)",
+            "temperature": "Optional: Temperature for generation (default: 0.7)"
         }
     },
-    {
-        "name": "generate_news_script",
-        "description": "Generate a news script from summarized articles",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "summarized_results": {
-                    "type": "array",
-                    "description": "List of summarized news articles"
-                },
-                "preferences": {
-                    "type": "object",
-                    "description": "User preferences"
-                }
-            },
-            "required": ["summarized_results", "preferences"]
+    "text_to_speech": {
+        "description": "Convert news script to speech and generate audio.",
+        "params": {
+            "user_text": "News script to convert to audio",
+            "voice_id": "Voice ID for TTS"
         }
     },
-    {
-        "name": "text_to_speech",
-        "description": "Convert text to speech using ElevenLabs",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "user_text": {
-                    "type": "string",
-                    "description": "Text to convert to speech"
-                },
-                "voice_id": {
-                    "type": "string",
-                    "description": "ElevenLabs voice ID"
-                }
-            },
-            "required": ["user_text", "voice_id"]
-        }
-    },
-    {
-        "name": "upload_audio",
-        "description": "Upload audio file to cloud storage",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "audio_file_path": {
-                    "type": "string",
-                    "description": "Path to the audio file"
-                }
-            },
-            "required": ["audio_file_path"]
+    "upload_audio": {
+        "description": "Upload the audio file to Google Cloud Storage and return a GCS URL.",
+        "params": {
+            "audio_file_path": "Path to the MP3 file to upload"
         }
     }
-] 
+} 
