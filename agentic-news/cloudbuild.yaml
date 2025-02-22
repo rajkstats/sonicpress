@@ -1,0 +1,23 @@
+steps:
+  # Build and deploy in a single step
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: /bin/bash
+    args:
+      - '-c'
+      - |
+        gcloud builds submit --tag gcr.io/$PROJECT_ID/sonicpress \
+        && gcloud run deploy sonicpress \
+          --image gcr.io/$PROJECT_ID/sonicpress \
+          --platform managed \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --set-env-vars="EXA_API_KEY=${_EXA_API_KEY},ELEVENLABS_API_KEY=${_ELEVENLABS_API_KEY},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GOOGLE_CREDS_JSON=${_GOOGLE_CREDS_JSON}"
+
+substitutions:
+  _EXA_API_KEY: ''  # Will be provided during deployment
+  _ELEVENLABS_API_KEY: ''  # Will be provided during deployment
+  _GCS_BUCKET_NAME: ''  # Will be provided during deployment
+  _GOOGLE_CREDS_JSON: ''  # Will be provided from creds_base64.txt
+
+images:
+  - 'gcr.io/$PROJECT_ID/sonicpress' 
