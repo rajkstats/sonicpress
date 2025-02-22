@@ -24,7 +24,7 @@ AI-Powered Audio News Generator with ElevenLabs Voice Technology
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/sonicpress.git
+git clone https://github.com/rajkstats/sonicpress.git
 cd sonicpress
 ```
 
