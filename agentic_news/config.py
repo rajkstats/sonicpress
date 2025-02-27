@@ -1,12 +1,18 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Force reload of environment variables from .env file
+load_dotenv(override=True)
 
 # API Keys
 EXA_API_KEY = os.getenv('EXA_API_KEY')
 ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
+
+# Print loaded keys for debugging (first few characters only)
+print(f"Loaded EXA_API_KEY: {EXA_API_KEY[:5]}..." if EXA_API_KEY else "EXA_API_KEY not found")
+print(f"Loaded ELEVENLABS_API_KEY: {ELEVENLABS_API_KEY[:5]}..." if ELEVENLABS_API_KEY else "ELEVENLABS_API_KEY not found")
+print(f"Loaded MISTRAL_API_KEY: {MISTRAL_API_KEY[:5]}..." if MISTRAL_API_KEY else "MISTRAL_API_KEY not found")
 
 # Cloud Storage
 GCS_BUCKET_NAME = os.getenv('GCS_BUCKET_NAME', 'aimakers-workspace')

@@ -6,6 +6,10 @@ import re
 from io import BytesIO
 from urllib.parse import urlparse
 import os
+from dotenv import load_dotenv
+
+# Force reload of environment variables before importing the agent
+load_dotenv(override=True)
 
 # Import NewsAgent
 from agentic_news.agent import NewsAgent
@@ -35,8 +39,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Add a button to clear the cache and reload credentials
+if st.sidebar.button("Reload Credentials"):
+    st.cache_resource.clear()
+    st.sidebar.success("Credentials reloaded from .env file!")
+    st.experimental_rerun()
+
 @st.cache_resource
 def get_agent():
+    # This will create a new agent with fresh credentials from .env
+    print("Creating new NewsAgent instance with latest credentials")
     return NewsAgent()
 
 agent = get_agent()
