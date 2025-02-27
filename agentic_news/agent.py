@@ -483,72 +483,88 @@ class NewsAgent:
                 # 3) Download & Validate image
                 if best_image_url:
                     try:
+                        print(f"Attempting to fetch image from: {best_image_url}")
                         img_response = requests.get(best_image_url, timeout=15)
-                        img_response.raise_for_status()
-                        with BytesIO(img_response.content) as buf:
-                            pil_img = Image.open(buf).convert("RGB")
+                        print(f"Image response status code: {img_response.status_code}")
+                        
+                        # Only proceed if status code is 200
+                        if img_response.status_code == 200:
+                            with BytesIO(img_response.content) as buf:
+                                pil_img = Image.open(buf).convert("RGB")
+                                
+                                # Validate image dimensions
+                                if pil_img.width <= 0 or pil_img.height <= 0:
+                                    print(f"Invalid image dimensions: {pil_img.width}x{pil_img.height}, skipping")
+                                    raise ValueError("Invalid image dimensions")
+                                
+                                # Log image details for debugging
+                                print(f"Successfully loaded image: {pil_img.width}x{pil_img.height}, format: {pil_img.format}")
+                                
+                                # Resize while keeping aspect ratio using the proper method
+                                try:
+                                    pil_img.thumbnail((800, 800), Resampling.LANCZOS)
+                                except (NameError, AttributeError):
+                                    # Fallback without specifying resampling filter
+                                    pil_img.thumbnail((800, 800))
+                                    
+                                temp_img_path = f"temp_img_{idx}.png"
+                                pil_img.save(temp_img_path)
 
-                        # Validate image dimensions
-                        if pil_img.width <= 0 or pil_img.height <= 0:
-                            print(f"Invalid image dimensions: {pil_img.width}x{pil_img.height}, skipping")
-                            best_image_url = None
-                            continue
+                                segment_duration = duration / (len(article_data) + 1)
+                                start_time = 2 + (idx * segment_duration)
 
-                        # Resize while keeping aspect ratio - use Resampling.LANCZOS if available
-                        try:
-                            pil_img.thumbnail((800, 800), Resampling.LANCZOS)
-                        except (ImportError, AttributeError):
-                            # Fallback for older PIL versions
-                            pil_img.thumbnail((800, 800))
+                                # ImageClip
+                                img_clip = ImageClip(temp_img_path)
+                                img_clip = img_clip.set_position(('center', 180)) \
+                                                   .set_start(start_time) \
+                                                   .set_duration(segment_duration)
+
+                                # Headline
+                                headline_text = article['title'][:80]
+                                if len(article['title']) > 80:
+                                    headline_text += '...'
+
+                                headline = TextClip(
+                                    headline_text,
+                                    fontsize=28,
+                                    color='white',
+                                    font='Arial-Bold',
+                                    method='caption',
+                                    align='center',
+                                    size=(width - 100, None)
+                                ).set_position(('center', 120)) \
+                                 .set_start(start_time) \
+                                 .set_duration(segment_duration)
+
+                                # Caption
+                                caption = TextClip(
+                                    article['summary'],
+                                    fontsize=24,
+                                    color='white',
+                                    font='Arial',
+                                    method='caption',
+                                    align='center',
+                                    size=(width - 200, None)
+                                ).set_position(('center', 600)) \
+                                 .set_start(start_time) \
+                                 .set_duration(segment_duration)
+
+                                image_clips.extend([img_clip, headline, caption])
+
+                                print(f"Found image for {article['url']}: {best_image_url}")
+                        else:
+                            print(f"Image request failed with status code: {img_response.status_code}")
+                            raise requests.HTTPError(f"HTTP Error: {img_response.status_code}")
                             
-                        temp_img_path = f"temp_img_{idx}.png"
-                        pil_img.save(temp_img_path)
-
-                        segment_duration = duration / (len(article_data) + 1)
-                        start_time = 2 + (idx * segment_duration)
-
-                        # ImageClip
-                        img_clip = ImageClip(temp_img_path)
-                        img_clip = img_clip.set_position(('center', 180)) \
-                                           .set_start(start_time) \
-                                           .set_duration(segment_duration)
-
-                        # Headline
-                        headline_text = article['title'][:80]
-                        if len(article['title']) > 80:
-                            headline_text += '...'
-
-                        headline = TextClip(
-                            headline_text,
-                            fontsize=28,
-                            color='white',
-                            font='Arial-Bold',
-                            method='caption',
-                            align='center',
-                            size=(width - 100, None)
-                        ).set_position(('center', 120)) \
-                         .set_start(start_time) \
-                         .set_duration(segment_duration)
-
-                        # Caption
-                        caption = TextClip(
-                            article['summary'],
-                            fontsize=24,
-                            color='white',
-                            font='Arial',
-                            method='caption',
-                            align='center',
-                            size=(width - 200, None)
-                        ).set_position(('center', 600)) \
-                         .set_start(start_time) \
-                         .set_duration(segment_duration)
-
-                        image_clips.extend([img_clip, headline, caption])
-
-                        print(f"Found image for {article['url']}: {best_image_url}")
-
-                    except (requests.HTTPError, UnidentifiedImageError) as e:
-                        print(f"Invalid or missing image for {article['url']}: {e}")
+                    except requests.exceptions.Timeout:
+                        print(f"Request timed out for image: {best_image_url}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"Request error for image {best_image_url}: {e}")
+                    except UnidentifiedImageError:
+                        print(f"Could not identify image format for: {best_image_url}")
+                    except Exception as e:
+                        print(f"Unexpected error processing image {best_image_url}: {e}")
+                        print(f"Error type: {type(e).__name__}")
                 else:
                     print(f"No valid image found for {article['url']}")
 
