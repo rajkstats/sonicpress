@@ -378,242 +378,374 @@ class NewsAgent:
         return self.state.get("upload_audio")
 
     def generate_video(self, script: str, audio_path: str,
-                       output_path: str = "output/news_video.mp4") -> str:
-        """Generate a news video using the script, images, and audio narration."""
-        try:
-            audio = AudioFileClip(audio_path)
-            duration = audio.duration
+                     output_path: str = "output/news_video.mp4") -> str:
+        """
+        Generate a news video using the script, images, and audio narration.
+        This version addresses:
+        - A scrolling ticker that is clearly visible (not hidden by controls).
+        - Article-image timing synced to script by word-count ratio.
+        - Fallback if no image is found.
+        """
+        from moviepy.editor import (
+            ColorClip, TextClip, AudioFileClip,
+            CompositeVideoClip, ImageClip
+        )
+        from PIL import Image, UnidentifiedImageError
+        import os
+        import re
+        import requests
+        from io import BytesIO
+        from urllib.parse import urlparse
 
+        try:
+            # ---------------------------------------------------------------------
+            # 1. PREPARE AUDIO/BACKGROUND
+            # ---------------------------------------------------------------------
+            audio = AudioFileClip(audio_path)
+            total_duration = audio.duration
+            
             width, height = 1280, 720
             background = ColorClip((width, height), color=(0, 20, 40))
-            background = background.set_duration(duration)
-
-            # Pull article data from self.state if it's stored after fetch_and_summarize
+            background = background.set_duration(total_duration)
+            
+            # ---------------------------------------------------------------------
+            # 2. PARSE SCRIPT PER ARTICLE
+            #    - We assume your final script has a structure like:
+            #         "Here are your news highlights.\n(Article 1) ... \n(Article 2) ...\nThat's your update."
+            #    - We'll try to identify each article chunk by splitting lines that
+            #      contain the article summaries. Adjust splitting logic if needed.
+            # ---------------------------------------------------------------------
+            # Example naive approach: split by double-newline or some marker
+            # If your script doesn't have consistent newlines, you can adapt.
+            article_text_chunks = []
+            lines = script.split("\n")
+            
+            # Gather each line that contains a summary or mention. In your code,
+            # you might have "Summary: ..." or something else. Adapt to your format.
+            # For simplicity, we treat every separate line as a "chunk" if it
+            # belongs to an article, ignoring intro/outro lines.
+            
+            # We'll assume the final script has, say, N lines that each correspond
+            # to one summarized story. This is just an example. Adapt to your real format.
+            for line in lines:
+                line_clean = line.strip()
+                if len(line_clean) > 0 and not line_clean.lower().startswith("here are your news highlights") \
+                and not line_clean.lower().startswith("that's your update") \
+                and not line_clean.lower().startswith("that's your update"):
+                    article_text_chunks.append(line_clean)
+            
+            # Count total words in *all* article lines
+            def word_count(s): return len(s.split())
+            total_words = sum(word_count(ch) for ch in article_text_chunks)
+            
+            # ---------------------------------------------------------------------
+            # 3. GATHER ARTICLES AND IMAGES
+            #    We'll reuse self.state['summaries'] which you have after fetch_and_summarize.
+            #    They're presumably in the same order you used for script generation.
+            #    If they're not in the exact same order, adapt accordingly.
+            # ---------------------------------------------------------------------
             summaries = self.state.get('summaries', [])
-
-            # We'll gather images for each article
-            image_clips = []
+            
+            # Flatten out: [ (title, summary, source) ... ] in the same order
             article_data = []
-
             for category in summaries:
-                for article in category['articles']:
-                    if '/category/' in article['source'] or article['source'].endswith('/news'):
-                        print(f"Skipping category page: {article['source']}")
-                        continue
+                for art in category['articles']:
                     article_data.append({
-                        'url': article['source'],
-                        'summary': article['summary'],
-                        'title': article['title']
+                        'title': art['title'],
+                        'summary': art['summary'],
+                        'url': art['source'],
                     })
-
-            # Use Exa's contents endpoint to get images for all articles at once
-            url_to_content = {}
-            if article_data:
-                article_urls = [article['url'] for article in article_data]
-                try:
-                    content_response = self.exa.get_contents(
-                        urls=article_urls,
-                        text=True,
-                        extras={"imageLinks": 3}
-                    )
-                    
-                    if content_response and hasattr(content_response, 'results'):
-                        for result in content_response.results:
-                            if hasattr(result, 'url'):
-                                url_to_content[result.url] = result
-                    
-                    print(f"Retrieved content for {len(url_to_content)} URLs from Exa")
-                except Exception as e:
-                    print(f"Exa contents API error: {str(e)}")
-
-            for idx, article in enumerate(article_data):
+            
+            # If you have more text lines than articles or vice versa, handle that
+            # here. We'll match them up by index in order.
+            min_count = min(len(article_data), len(article_text_chunks))
+            
+            # Pull images from Exa or fallback
+            # We'll store (img_path or None) in a parallel list.
+            def fetch_best_image_for(url):
+                """Try to find the best image for a given article URL using Exa or fallback."""
                 best_image_url = None
                 
-                # Try to get image from Exa content first
-                if article['url'] in url_to_content:
-                    result = url_to_content[article['url']]
-                    if hasattr(result, 'image') and result.image:
-                        best_image_url = result.image
-                    elif hasattr(result, 'extras') and hasattr(result.extras, 'imageLinks') and result.extras.imageLinks:
-                        best_image_url = result.extras.imageLinks[0]
+                # 1) Use self.exa get_contents if available
+                #    We can do a single call outside the loop for all URLs,
+                #    but for brevity we do it per-article.
+                try:
+                    print(f"Fetching content for URL: {url}")
+                    # Use only the basic parameters that are supported
+                    content_response = self.exa.get_contents(urls=[url])
+                    if content_response and hasattr(content_response, 'contents') and content_response.contents:
+                        for c in content_response.contents:
+                            if hasattr(c, 'images') and c.images:
+                                print(f"Found {len(c.images)} images in content")
+                                valid_imgs = [
+                                    img for img in c.images
+                                    if hasattr(img, 'width') and hasattr(img, 'height') and 
+                                    img.width >= 300 and img.height >= 200
+                                ]
+                                if valid_imgs:
+                                    best_image = max(valid_imgs, key=lambda x: x.width * x.height)
+                                    best_image_url = best_image.url
+                                    print(f"Selected best image: {best_image_url}")
+                                    break
+                except Exception as e:
+                    print(f"Exa content fetch failed for {url}: {e}")
                 
-                # Fallback to the original method if needed
+                # 2) Fallback: Try multiple meta tag patterns for images
                 if not best_image_url:
                     try:
-                        # Original method as fallback
-                        content_response = self.exa.get_contents(
-                            urls=[article['url']],
-                            max_image_count=3
-                        )
-                        if content_response and getattr(content_response, 'contents', []):
-                            for content in content_response.contents:
-                                if hasattr(content, 'images') and content.images:
-                                    valid_imgs = [
-                                        img for img in content.images
-                                        if img.width >= 300 and img.height >= 200
-                                    ]
-                                    if valid_imgs:
-                                        # Pick the largest
-                                        best_image = max(valid_imgs, key=lambda x: x.width * x.height)
-                                        best_image_url = best_image.url
-                                        break
-                    except Exception as e:
-                        print(f"Exa get_contents fallback error for {article['url']}: {e}")
-
-                # 2) Fallback: fetch HTML & look for <meta property="og:image">
-                if not best_image_url:
-                    try:
-                        resp = requests.get(article['url'], timeout=10)
+                        print(f"Trying fallback image extraction for {url}")
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                        resp = requests.get(url, headers=headers, timeout=10)
                         if resp.status_code == 200:
-                            matches = re.findall(
-                                r'<meta\s+(?:property|name)="(?:og:image|og:image:secure_url|twitter:image)"\s+content="([^"]+)"',
-                                resp.text
-                            )
-                            if matches:
-                                best_image_url = matches[0]
-                                
-                            # Make relative URLs absolute
-                            if best_image_url and best_image_url.startswith('/'):
-                                parsed_url = urlparse(article['url'])
-                                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                                best_image_url = base_url + best_image_url
+                            # Try multiple meta tag patterns
+                            meta_patterns = [
+                                r'<meta\s+(?:property|name)="(?:og:image|og:image:secure_url)"\s+content="([^"]+)"',
+                                r'<meta\s+(?:content)="([^"]+)"\s+(?:property|name)="(?:og:image|og:image:secure_url)"',
+                                r'<meta\s+(?:property|name)="(?:twitter:image)"\s+content="([^"]+)"',
+                                r'<meta\s+(?:content)="([^"]+)"\s+(?:property|name)="(?:twitter:image)"',
+                                r'<img[^>]+class="[^"]*(?:featured|hero|main|article)[^"]*"[^>]+src="([^"]+)"',
+                                r'<img[^>]+src="([^"]+(?:jpg|jpeg|png|gif))"[^>]+(?:width|height)="[2-9]\d{2,}"'
+                            ]
+                            
+                            for pattern in meta_patterns:
+                                matches = re.findall(pattern, resp.text)
+                                if matches:
+                                    best_image_url = matches[0]
+                                    print(f"Found image via pattern: {best_image_url}")
+                                    # Make relative URLs absolute
+                                    if best_image_url.startswith('/'):
+                                        parsed_url = urlparse(url)
+                                        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                                        best_image_url = base_url + best_image_url
+                                    break
                     except Exception as e:
-                        print(f"Fallback image fetch failed: {e}")
-
-                # 3) Download & Validate image
+                        print(f"Fallback meta-image fetch failed for {url}: {e}")
+                
+                # 3) Download & validate image
                 if best_image_url:
                     try:
-                        print(f"Attempting to fetch image from: {best_image_url}")
-                        img_response = requests.get(best_image_url, timeout=15)
-                        print(f"Image response status code: {img_response.status_code}")
-                        
-                        # Only proceed if status code is 200
-                        if img_response.status_code == 200:
-                            with BytesIO(img_response.content) as buf:
-                                pil_img = Image.open(buf).convert("RGB")
-                                
-                                # Validate image dimensions
-                                if pil_img.width <= 0 or pil_img.height <= 0:
-                                    print(f"Invalid image dimensions: {pil_img.width}x{pil_img.height}, skipping")
-                                    raise ValueError("Invalid image dimensions")
-                                
-                                # Log image details for debugging
-                                print(f"Successfully loaded image: {pil_img.width}x{pil_img.height}, format: {pil_img.format}")
-                                
-                                # Resize while keeping aspect ratio using the proper method
+                        print(f"Downloading image from: {best_image_url}")
+                        img_resp = requests.get(best_image_url, timeout=15)
+                        if img_resp.status_code == 200:
+                            with BytesIO(img_resp.content) as buf:
                                 try:
-                                    pil_img.thumbnail((800, 800), Resampling.LANCZOS)
-                                except (NameError, AttributeError):
-                                    # Fallback without specifying resampling filter
-                                    pil_img.thumbnail((800, 800))
+                                    pil_img = Image.open(buf).convert("RGB")
+                                    if pil_img.width < 10 or pil_img.height < 10:
+                                        print(f"Image too small: {pil_img.width}x{pil_img.height}")
+                                        return None
                                     
-                                temp_img_path = f"temp_img_{idx}.png"
-                                pil_img.save(temp_img_path)
-
-                                segment_duration = duration / (len(article_data) + 1)
-                                start_time = 2 + (idx * segment_duration)
-
-                                # ImageClip
-                                img_clip = ImageClip(temp_img_path)
-                                img_clip = img_clip.set_position(('center', 180)) \
-                                                   .set_start(start_time) \
-                                                   .set_duration(segment_duration)
-
-                                # Headline
-                                headline_text = article['title'][:80]
-                                if len(article['title']) > 80:
-                                    headline_text += '...'
-
-                                headline = TextClip(
-                                    headline_text,
-                                    fontsize=28,
-                                    color='white',
-                                    font='Arial-Bold',
-                                    method='caption',
-                                    align='center',
-                                    size=(width - 100, None)
-                                ).set_position(('center', 120)) \
-                                 .set_start(start_time) \
-                                 .set_duration(segment_duration)
-
-                                # Caption
-                                caption = TextClip(
-                                    article['summary'],
-                                    fontsize=24,
-                                    color='white',
-                                    font='Arial',
-                                    method='caption',
-                                    align='center',
-                                    size=(width - 200, None)
-                                ).set_position(('center', 600)) \
-                                 .set_start(start_time) \
-                                 .set_duration(segment_duration)
-
-                                image_clips.extend([img_clip, headline, caption])
-
-                                print(f"Found image for {article['url']}: {best_image_url}")
-                        else:
-                            print(f"Image request failed with status code: {img_response.status_code}")
-                            raise requests.HTTPError(f"HTTP Error: {img_response.status_code}")
-                            
-                    except requests.exceptions.Timeout:
-                        print(f"Request timed out for image: {best_image_url}")
-                    except requests.exceptions.RequestException as e:
-                        print(f"Request error for image {best_image_url}: {e}")
-                    except UnidentifiedImageError:
-                        print(f"Could not identify image format for: {best_image_url}")
+                                    # Create output directory if it doesn't exist
+                                    os.makedirs("temp_images", exist_ok=True)
+                                    
+                                    # Resize keeping aspect ratio
+                                    try:
+                                        pil_img.thumbnail((800, 800), Image.LANCZOS)
+                                    except AttributeError:
+                                        # Fallback for older PIL versions
+                                        pil_img.thumbnail((800, 800), Image.ANTIALIAS)
+                                    
+                                    temp_img_path = f"temp_images/temp_img_{abs(hash(url))}.png"
+                                    pil_img.save(temp_img_path)
+                                    print(f"Successfully saved image to {temp_img_path}")
+                                    return temp_img_path
+                                except UnidentifiedImageError:
+                                    print(f"Could not identify image format for {best_image_url}")
+                                except Exception as e:
+                                    print(f"Error processing image from {best_image_url}: {e}")
                     except Exception as e:
-                        print(f"Unexpected error processing image {best_image_url}: {e}")
-                        print(f"Error type: {type(e).__name__}")
-                else:
-                    print(f"No valid image found for {article['url']}")
-
-            # Branding elements
+                        print(f"Could not retrieve/validate {best_image_url}: {e}")
+                
+                # 4) Last resort: Create a default image with the article title
+                try:
+                    print(f"Creating default image for {url}")
+                    # Get the article title from article_data
+                    article_title = None
+                    for article in article_data:
+                        if article['url'] == url:
+                            article_title = article['title']
+                            break
+                    
+                    if not article_title:
+                        article_title = "News Article"
+                    
+                    # Create a simple image with the title
+                    img_width, img_height = 800, 450
+                    background_color = (60, 60, 100)
+                    
+                    # Create a blank image with background color
+                    img = Image.new('RGB', (img_width, img_height), background_color)
+                    
+                    # Create output directory if it doesn't exist
+                    os.makedirs("temp_images", exist_ok=True)
+                    
+                    # Save the image
+                    temp_img_path = f"temp_images/default_img_{abs(hash(url))}.png"
+                    img.save(temp_img_path)
+                    print(f"Created default image at {temp_img_path}")
+                    return temp_img_path
+                except Exception as e:
+                    print(f"Failed to create default image: {e}")
+                
+                print(f"No valid image found for {url}")
+                return None
+            
+            images_for_articles = []
+            for idx, article in enumerate(article_data):
+                img_path = fetch_best_image_for(article['url'])
+                images_for_articles.append(img_path)
+            
+            # ---------------------------------------------------------------------
+            # 4. BUILD CLIPS
+            # ---------------------------------------------------------------------
+            all_clips = [background]
+            
+            # Branding / Logo text
             logo_text = TextClip(
                 "SonicPress",
-                fontsize=30,
+                fontsize=40,
                 color='white',
                 font='Arial-Bold',
                 method='label'
-            ).set_position((50, 50)).set_duration(duration)
-
-            ticker_bg = ColorClip((width, 60), color=(200, 50, 50)).set_opacity(0.8)
-            ticker_bg = ticker_bg.set_position(('center', height - 30)).set_duration(duration)
-
-            # Construct a ticker text from article titles
-            ticker_titles = [a['title'] for a in article_data]
-            ticker_text_content = "BREAKING NEWS   •   " + "   •   ".join(ticker_titles)
-            ticker_text = TextClip(
-                ticker_text_content,
-                fontsize=20,
-                color='white',
-                font='Arial-Bold',
-                method='label'
-            ).set_position(('center', height - 30)).set_duration(duration)
-
+            ).set_position((50, 50)).set_duration(total_duration)
+            all_clips.append(logo_text)
+            
+            # Intro
+            intro_duration = 2  # first 2s
             intro_text = TextClip(
                 "SonicPress News",
                 fontsize=70,
                 color='white',
                 font='Arial-Bold',
-                method='label'
-            ).set_position('center').set_start(0).set_duration(2)
-
+                method='caption'
+            ).set_position('center').set_duration(intro_duration)
+            all_clips.append(intro_text)
+            
+            # Outro
+            outro_duration = 3  # last 3s
             outro_text = TextClip(
-                "Thanks for watching",
+                "Thanks for watching!",
                 fontsize=50,
                 color='white',
                 font='Arial-Bold',
                 method='label'
-            ).set_position('center').set_start(duration - 2).set_duration(2)
-
-            all_clips = [background, logo_text, ticker_bg, ticker_text, intro_text, outro_text]
-            all_clips.extend(image_clips)
-
-            final_video = CompositeVideoClip(all_clips)
-            final_video = final_video.set_audio(audio)
-
-            final_video.write_videofile(
+            ).set_position('center').set_start(total_duration - outro_duration).set_duration(outro_duration)
+            all_clips.append(outro_text)
+            
+            # 4A. Make a SCROLLING TICKER along the bottom
+            #     We'll place it above the potential play controls. For instance, at y = height-100.
+            ticker_height = 60
+            ticker_bg = ColorClip(size=(width, ticker_height), color=(200, 50, 50)).set_duration(total_duration)
+            # shift ticker up a bit from bottom
+            ticker_y = height - ticker_height - 40
+            
+            ticker_bg = ticker_bg.set_position((0, ticker_y))
+            all_clips.append(ticker_bg)
+            
+            # Ticker text content
+            ticker_titles = [art['title'] for art in article_data]
+            ticker_text_content = " • ".join(ticker_titles)
+            
+            # Ticker as a horizontally-moving clip
+            # We'll create an off-screen starting position, move left over total_duration
+            text_clip = TextClip(
+                ticker_text_content,
+                fontsize=28,
+                color='white',
+                font='Arial-Bold'
+            )
+            
+            text_clip_w, _ = text_clip.size
+            # Start at x=width, end at x= -text_clip_w, over total_duration
+            # We define a dynamic position function:
+            def scroll_position(t):
+                # linear interpolation from width to -(text_clip_w) over total_duration
+                x = width - (width + text_clip_w) * (t / total_duration)
+                return (x, ticker_y + (ticker_height - text_clip.h) // 2)
+            
+            scrolling_ticker = text_clip.set_duration(total_duration).set_position(scroll_position)
+            all_clips.append(scrolling_ticker)
+            
+            # 4B. Generate article segments in sync with audio (word-count ratio).
+            #     For article i, we compute its portion of the total script words.
+            # ---------------------------------------------------------------------
+            elapsed = intro_duration  # start placing first article after intro
+            for i in range(min_count):
+                article_text = article_text_chunks[i]
+                article_wordcount = word_count(article_text)
+                # fraction of total script
+                fraction = article_wordcount / total_words if total_words else 0
+                # how many seconds this article consumes in the narration
+                segment_duration = fraction * (total_duration - (intro_duration + outro_duration))
+                if segment_duration < 1:
+                    segment_duration = 1.0  # ensure at least 1s
+                
+                start_time = elapsed
+                end_time = start_time + segment_duration
+                
+                # HEADLINE
+                headline_clip = TextClip(
+                    article_data[i]['title'],
+                    fontsize=34,
+                    color='white',
+                    font='Arial-Bold',
+                    method='caption',
+                    size=(width - 100, None),
+                    align='center'
+                ).set_position(('center', 100)) \
+                .set_start(start_time) \
+                .set_duration(segment_duration)
+                all_clips.append(headline_clip)
+                
+                # SUMMARY
+                summary_clip = TextClip(
+                    article_data[i]['summary'],
+                    fontsize=28,
+                    color='white',
+                    font='Arial',
+                    method='caption',
+                    size=(width - 200, None),
+                    align='center'
+                ).set_position(('center', 600)) \
+                .set_start(start_time) \
+                .set_duration(segment_duration)
+                all_clips.append(summary_clip)
+                
+                # IMAGE or FALLBACK BACKGROUND
+                if images_for_articles[i] is not None:
+                    # show the downloaded image
+                    img_clip = ImageClip(images_for_articles[i])
+                    # center image at y=200 for instance
+                    img_clip = img_clip.set_position(('center', 180)) \
+                                    .set_start(start_time) \
+                                    .set_duration(segment_duration)
+                    all_clips.append(img_clip)
+                else:
+                    # fallback color block
+                    fallback_bg = ColorClip(size=(800, 400), color=(60, 60, 60)) \
+                        .set_position(('center', 180)) \
+                        .set_start(start_time) \
+                        .set_duration(segment_duration)
+                    no_image_text = TextClip(
+                        "No image available",
+                        fontsize=26,
+                        color='white',
+                        font='Arial-Bold'
+                    ).set_position(('center', 360)) \
+                    .set_start(start_time) \
+                    .set_duration(segment_duration)
+                    all_clips.extend([fallback_bg, no_image_text])
+                
+                # Advance time pointer
+                elapsed += segment_duration
+            
+            # ---------------------------------------------------------------------
+            # 5. COMBINE & RENDER
+            # ---------------------------------------------------------------------
+            final_clip = CompositeVideoClip(all_clips).set_audio(audio)
+            
+            final_clip.write_videofile(
                 output_path,
                 fps=24,
                 codec='libx264',
@@ -622,17 +754,28 @@ class NewsAgent:
                 preset='medium',
                 bitrate='3000k'
             )
-
-            final_video.close()
+            
+            # Cleanup
+            final_clip.close()
             audio.close()
-
-            # Cleanup temp images
-            for idx in range(len(article_data)):
-                temp_path = f"temp_img_{idx}.png"
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-
+            
+            # Remove temp images
+            for img_path in images_for_articles:
+                if img_path and os.path.exists(img_path):
+                    try:
+                        os.remove(img_path)
+                    except Exception as e:
+                        print(f"Failed to remove temp image {img_path}: {e}")
+            
+            # Try to remove the temp directory if it's empty
+            try:
+                if os.path.exists("temp_images") and not os.listdir("temp_images"):
+                    os.rmdir("temp_images")
+            except Exception as e:
+                print(f"Failed to remove temp_images directory: {e}")
+            
             return output_path
+        
         except Exception as e:
             print(f"Failed to generate video: {str(e)}")
             raise
