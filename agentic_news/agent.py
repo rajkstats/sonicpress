@@ -663,7 +663,7 @@ class NewsAgent:
                     method="caption",
                     size=(width - 100, None),
                     align="center"
-                ).set_position(("center", 30)) \
+                ).set_position(("center", 80)) \
                 .set_start(start_time) \
                 .set_duration(segment_duration)
                 all_clips.append(headline_clip)
