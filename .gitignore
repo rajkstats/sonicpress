@@ -1,3 +1,14 @@
+# Credentials and sensitive files
+**/credentials/
+**/credentials/*.json
+*.json.secret
+*.pem
+*.key
+*.crt
+.env
+.env.*
+creds_base64.txt
+
 # Python
 __pycache__/
 *.py[cod]
@@ -21,10 +32,8 @@ wheels/
 *.egg
 
 # Virtual Environment
-.env
-.venv
-env/
 venv/
+env/
 ENV/
 
 # IDE
@@ -32,22 +41,17 @@ ENV/
 .vscode/
 *.swp
 *.swo
+.DS_Store
 
 # Project specific
-output_speech.mp3
+output/
 *.mp3
+*.mp4
 *.wav
-google_creds.json
-aimakers_cred.json
-creds_base64.txt
-
-# Logs
-*.log
-*.html
+logs/
 news_agent_log.html
 
 # OS
-.DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
