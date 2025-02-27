@@ -13,11 +13,17 @@ from moviepy.editor import (
     CompositeVideoClip, ImageClip
 )
 from PIL import Image, UnidentifiedImageError
+try:
+    from PIL.Image import Resampling  # Import the newer Resampling enum
+except ImportError:
+    # Fallback for older PIL versions
+    pass
 import numpy as np
 from proglog import ProgressBarLogger
 import math
 import re
 from io import BytesIO
+from urllib.parse import urlparse
 
 from .config import (
     EXA_API_KEY,
@@ -141,7 +147,10 @@ class NewsAgent:
                         "query": search_query,
                         "articles": summarized_articles
                     })
-
+            
+            # Store the results in self.state for later use in generate_video
+            self.state['summaries'] = search_results
+            
             return search_results
 
         except Exception as e:
@@ -397,29 +406,59 @@ class NewsAgent:
                         'title': article['title']
                     })
 
+            # Use Exa's contents endpoint to get images for all articles at once
+            url_to_content = {}
+            if article_data:
+                article_urls = [article['url'] for article in article_data]
+                try:
+                    content_response = self.exa.get_contents(
+                        urls=article_urls,
+                        text=True,
+                        extras={"imageLinks": 3}
+                    )
+                    
+                    if content_response and hasattr(content_response, 'results'):
+                        for result in content_response.results:
+                            if hasattr(result, 'url'):
+                                url_to_content[result.url] = result
+                    
+                    print(f"Retrieved content for {len(url_to_content)} URLs from Exa")
+                except Exception as e:
+                    print(f"Exa contents API error: {str(e)}")
+
             for idx, article in enumerate(article_data):
                 best_image_url = None
-                try:
-                    # Fix: Pass URL as a list to get_contents
-                    content_response = self.exa.get_contents(
-                        urls=[article['url']],  # Changed from article['url'] to [article['url']]
-                        include_images=True,
-                        max_image_count=3
-                    )
-                    if content_response and getattr(content_response, 'contents', []):
-                        for content in content_response.contents:
-                            if hasattr(content, 'images') and content.images:
-                                valid_imgs = [
-                                    img for img in content.images
-                                    if img.width >= 300 and img.height >= 200
-                                ]
-                                if valid_imgs:
-                                    # Pick the largest
-                                    best_image = max(valid_imgs, key=lambda x: x.width * x.height)
-                                    best_image_url = best_image.url
-                                    break
-                except Exception as e:
-                    print(f"Exa get_contents error for {article['url']}: {e}")
+                
+                # Try to get image from Exa content first
+                if article['url'] in url_to_content:
+                    result = url_to_content[article['url']]
+                    if hasattr(result, 'image') and result.image:
+                        best_image_url = result.image
+                    elif hasattr(result, 'extras') and hasattr(result.extras, 'imageLinks') and result.extras.imageLinks:
+                        best_image_url = result.extras.imageLinks[0]
+                
+                # Fallback to the original method if needed
+                if not best_image_url:
+                    try:
+                        # Original method as fallback
+                        content_response = self.exa.get_contents(
+                            urls=[article['url']],
+                            max_image_count=3
+                        )
+                        if content_response and getattr(content_response, 'contents', []):
+                            for content in content_response.contents:
+                                if hasattr(content, 'images') and content.images:
+                                    valid_imgs = [
+                                        img for img in content.images
+                                        if img.width >= 300 and img.height >= 200
+                                    ]
+                                    if valid_imgs:
+                                        # Pick the largest
+                                        best_image = max(valid_imgs, key=lambda x: x.width * x.height)
+                                        best_image_url = best_image.url
+                                        break
+                    except Exception as e:
+                        print(f"Exa get_contents fallback error for {article['url']}: {e}")
 
                 # 2) Fallback: fetch HTML & look for <meta property="og:image">
                 if not best_image_url:
@@ -427,27 +466,41 @@ class NewsAgent:
                         resp = requests.get(article['url'], timeout=10)
                         if resp.status_code == 200:
                             matches = re.findall(
-                                r'<meta property="(og:image|og:image:secure_url|twitter:image)" content="([^"]+)"',
+                                r'<meta\s+(?:property|name)="(?:og:image|og:image:secure_url|twitter:image)"\s+content="([^"]+)"',
                                 resp.text
                             )
                             if matches:
-                                best_image_url = matches[0][1]
+                                best_image_url = matches[0]
+                                
+                            # Make relative URLs absolute
+                            if best_image_url and best_image_url.startswith('/'):
+                                parsed_url = urlparse(article['url'])
+                                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                                best_image_url = base_url + best_image_url
                     except Exception as e:
                         print(f"Fallback image fetch failed: {e}")
-
-                # Optionally, fallback to stock images or default placeholder
-                # e.g. best_image_url = "some_default_image.png"
 
                 # 3) Download & Validate image
                 if best_image_url:
                     try:
-                        img_response = requests.get(best_image_url, timeout=10)
+                        img_response = requests.get(best_image_url, timeout=15)
                         img_response.raise_for_status()
                         with BytesIO(img_response.content) as buf:
                             pil_img = Image.open(buf).convert("RGB")
 
-                        # Resize while keeping aspect ratio
-                        pil_img.thumbnail((800, 800))
+                        # Validate image dimensions
+                        if pil_img.width <= 0 or pil_img.height <= 0:
+                            print(f"Invalid image dimensions: {pil_img.width}x{pil_img.height}, skipping")
+                            best_image_url = None
+                            continue
+
+                        # Resize while keeping aspect ratio - use Resampling.LANCZOS if available
+                        try:
+                            pil_img.thumbnail((800, 800), Resampling.LANCZOS)
+                        except (ImportError, AttributeError):
+                            # Fallback for older PIL versions
+                            pil_img.thumbnail((800, 800))
+                            
                         temp_img_path = f"temp_img_{idx}.png"
                         pil_img.save(temp_img_path)
 

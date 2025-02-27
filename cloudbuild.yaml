@@ -1,23 +1,51 @@
 steps:
-  # Build and deploy in a single step
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/sonicpress', '.']
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/sonicpress']
+
+  # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: /bin/bash
+    entrypoint: gcloud
     args:
-      - '-c'
-      - |
-        gcloud builds submit --tag gcr.io/$PROJECT_ID/sonicpress \
-        && gcloud run deploy sonicpress \
-          --image gcr.io/$PROJECT_ID/sonicpress \
-          --platform managed \
-          --region us-central1 \
-          --allow-unauthenticated \
-          --set-env-vars="EXA_API_KEY=${_EXA_API_KEY},ELEVENLABS_API_KEY=${_ELEVENLABS_API_KEY},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GOOGLE_CREDS_JSON=${_GOOGLE_CREDS_JSON}"
+      - 'run'
+      - 'deploy'
+      - 'sonicpress'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/sonicpress'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '3600'
+      - '--no-traffic'
+      - '--tag=v1'
+      - '--set-env-vars'
+      - 'EXA_API_KEY=${_EXA_API_KEY},ELEVENLABS_API_KEY=${_ELEVENLABS_API_KEY},MISTRAL_API_KEY=${_MISTRAL_API_KEY},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GOOGLE_CREDS_JSON=${_GOOGLE_CREDS_JSON}'
 
 substitutions:
   _EXA_API_KEY: ''  # Will be provided during deployment
   _ELEVENLABS_API_KEY: ''  # Will be provided during deployment
+  _MISTRAL_API_KEY: ''  # Will be provided during deployment
   _GCS_BUCKET_NAME: ''  # Will be provided during deployment
   _GOOGLE_CREDS_JSON: ''  # Will be provided from creds_base64.txt
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+  env:
+    - 'DOCKER_BUILDKIT=0'
+    - 'CLOUDSDK_BUILDS_USE_KANIKO=false'
 
 images:
   - 'gcr.io/$PROJECT_ID/sonicpress' 

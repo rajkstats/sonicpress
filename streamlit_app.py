@@ -1,4 +1,3 @@
-# streamlitapp.py
 import streamlit as st
 import json
 from datetime import datetime, timedelta
@@ -8,11 +7,10 @@ from io import BytesIO
 from urllib.parse import urlparse
 import os
 
-# Import your NewsAgent here
-# from agentic_news.agent import NewsAgent
-from agentic_news.agent import NewsAgent  # Correct import path
+# Import NewsAgent
+from agentic_news.agent import NewsAgent
 
-# Example constants used in a loading UI (optional)
+# Example constants used in a loading UI
 LOADING_ICONS = ["⏳","🔄","🌐","⚙️","✅"]
 LOADING_QUOTES = [
     "Gathering fresh headlines...",
@@ -95,6 +93,12 @@ with st.sidebar:
     st.markdown("### ⚙️ Content Settings")
     num_results = st.slider("Articles per topic", 1, 5, 2)
     days_ago = st.slider("News age (days)", 1, 30, 7)
+    
+    # Added image quality settings
+    st.markdown("### 🖼️ Image Settings")
+    min_image_width = st.slider("Min image width", 200, 800, 300)
+    min_image_height = st.slider("Min image height", 200, 800, 200)
+    use_placeholder = st.checkbox("Use placeholder for missing images", value=True)
 
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -143,6 +147,9 @@ else:
             "voice_id": voice_id_map[voice_mode],
             "num_results": num_results,
             "date": (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d"),
+            "min_image_width": min_image_width,
+            "min_image_height": min_image_height,
+            "use_placeholder": use_placeholder
         }
         progress_bar.progress(20)
 
@@ -171,7 +178,7 @@ else:
         # Step 5: Generate Video
         status_placeholder.markdown("### 5) Composing Final Video...")
         # Ensure output directory exists
-        os.makedirs(os.path.dirname("output/"), exist_ok=True)
+        os.makedirs("output", exist_ok=True)
         video_path = agent.generate_video(script, audio_path)
         st.session_state.video_path = video_path
         progress_bar.progress(100)
@@ -179,17 +186,32 @@ else:
         status_placeholder.empty()
         st.success("✅ Your news video is ready!")
 
-        video_placeholder.video(video_path)
+        # Check if we got a video or just audio
+        is_video = video_path.endswith(('.mp4', '.avi', '.mov', '.mkv'))
+        
+        if is_video:
+            video_placeholder.video(video_path)
+        else:
+            st.audio(audio_path)
+            st.warning("Video generation encountered issues. Falling back to audio-only mode.")
 
         with st.expander("Download Options"):
-            file_format = st.radio("Format", ["Video (MP4)", "Audio (MP3)"], horizontal=True)
-            if file_format == "Video (MP4)":
-                st.download_button(
-                    "Download Video",
-                    data=open(video_path, "rb"),
-                    file_name="sonicpress_news.mp4",
-                    mime="video/mp4"
-                )
+            if is_video:
+                file_format = st.radio("Format", ["Video (MP4)", "Audio (MP3)"], horizontal=True)
+                if file_format == "Video (MP4)":
+                    st.download_button(
+                        "Download Video",
+                        data=open(video_path, "rb"),
+                        file_name="sonicpress_news.mp4",
+                        mime="video/mp4"
+                    )
+                else:
+                    st.download_button(
+                        "Download Audio",
+                        data=open(audio_path, "rb"),
+                        file_name="sonicpress_news.mp3",
+                        mime="audio/mp3"
+                    )
             else:
                 st.download_button(
                     "Download Audio",
