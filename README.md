@@ -1,6 +1,6 @@
 # The SonicPress Times 🎙️
 
-Your On-Demand Newsroom - Built for ElevenLabs x a16z AI Agents Hackathon 2025
+Your Personalized NewsBriefing - Built for ElevenLabs x a16z AI Agents Hackathon 2025
 
 ##  Demo
 
@@ -19,19 +19,6 @@ https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
 - **Cloud Integration**: Google Cloud Storage for asset management
 - **Modern Web Interface**: Streamlit-based UI with NYTimes-inspired styling
 - **Cloud-Ready**: Optimized for Google Cloud Run deployment
-
-## System Architecture
-
-![SonicPress System Architecture](flow_chart_sonic_press.png)
-
-The diagram above illustrates the flow of the SonicPress system:
-1. User preferences are collected
-2. News content is fetched and processed through Exa API and LiteLLM
-3. A news script is generated
-4. Audio is created via ElevenLabs
-5. Video is generated using MoviePy and FFmpeg
-6. Content is uploaded to Google Cloud Storage
-7. The entire process is orchestrated by the NewsAgent
 
 ## 🛠️ Tech Stack
 
@@ -208,14 +195,6 @@ docker run -d -p 8080:8080 \
 4. Click "Compile My Headlines"
 5. Download the generated video or audio
 
-## 🔧 Advanced Features
-
-### Smart Relevance Filtering
-
-The system uses AI to ensure only topic-relevant articles are included in your briefing:
-
-- **Contextual Understanding**: Recognizes related technologies and companies
-- **Adaptive Relevance**: Considers both direct and indirect relevance to topics
 
 ### Voice Settings
 
