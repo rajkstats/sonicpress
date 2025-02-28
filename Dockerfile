@@ -2,57 +2,69 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies - only keep essential ones
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    software-properties-common \
     ffmpeg \
     imagemagick \
-    libxkbcommon0 \
-    libxrandr2 \
-    libxss1 \
-    libxtst6 \
     libgl1-mesa-glx \
-    libegl1-mesa \
-    libopengl0 \
-    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure ImageMagick policy to allow all operations
-RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
-        # Allow PDF operations \
-        sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml && \
-        # Allow memory and disk resource limits \
-        sed -i 's/domain="resource" name="memory"/domain="resource" name="memory" value="8GiB"/' /etc/ImageMagick-6/policy.xml && \
-        sed -i 's/domain="resource" name="map"/domain="resource" name="map" value="4GiB"/' /etc/ImageMagick-6/policy.xml && \
-        sed -i 's/domain="resource" name="disk"/domain="resource" name="disk" value="8GiB"/' /etc/ImageMagick-6/policy.xml && \
-        # Allow all path operations \
-        sed -i 's/<policy domain="path" rights="none" pattern="@\*"/<policy domain="path" rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml; \
-    fi
+# Create a completely new ImageMagick policy file with permissive settings
+COPY docker/imagemagick-policy.xml /etc/ImageMagick-6/policy.xml
 
-# Copy application code first
-COPY . .
+# Create necessary directories first
+RUN mkdir -p /app/output /app/temp_images && \
+    chmod -R 777 /app/output /app/temp_images
+
+# Copy requirements first to leverage Docker cache
+COPY pyproject.toml poetry.lock ./
+
+# Copy the agentic_news directory first to ensure it exists
+COPY agentic_news ./agentic_news/
+
+# Ensure __init__.py exists in the agentic_news directory
+RUN touch ./agentic_news/__init__.py && \
+    echo "# Import NewsAgent class" > ./agentic_news/__init__.py && \
+    echo "from .agent import NewsAgent" >> ./agentic_news/__init__.py
 
 # Install poetry and dependencies
 ENV PATH="/root/.local/bin:$PATH"
-RUN curl -sSL https://install.python-poetry.org | python3 - \
-    && poetry config virtualenvs.create false \
-    && poetry install --without dev --no-interaction --no-ansi
+RUN pip install --no-cache-dir --upgrade pip && \
+    curl -sSL https://install.python-poetry.org | python3 - && \
+    poetry config virtualenvs.create false && \
+    poetry install --without dev --no-interaction --no-ansi
 
-# Create necessary directories
-RUN mkdir -p /app/output
+# Copy the rest of the application code
+COPY . .
+
+# Ensure the docker directory exists and has the MoviePy patch
+RUN mkdir -p /app/docker && \
+    ls -la /app/docker || echo "Docker directory is empty"
 
 # Set environment variables
 ENV PORT=8080
 ENV HOST=0.0.0.0
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/google_creds.json
 ENV PYTHONUNBUFFERED=1
 ENV STREAMLIT_SERVER_PORT=8080
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+# Set environment variable to disable ImageMagick security
+ENV MAGICK_CONFIGURE_PATH=/app/imagemagick
+
+# Create custom ImageMagick config directory and policy
+RUN mkdir -p /app/imagemagick
+COPY docker/imagemagick-policy.xml /app/imagemagick/policy.xml
+
+# Make startup script executable
+RUN chmod +x /app/startup.sh
+
+# Debug: Print directory structure
+RUN echo "Directory structure:" && \
+    find /app -type f -name "*.py" | sort
 
 # Expose port
 EXPOSE 8080
 
 # Command to run the application
-CMD ["sh", "-c", "echo $GOOGLE_CREDS_JSON > /app/google_creds.json && poetry run streamlit run streamlit_app.py --server.port=$PORT --server.address=$HOST"] 
+CMD ["/app/startup.sh"] 

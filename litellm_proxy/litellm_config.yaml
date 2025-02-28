@@ -1,0 +1,38 @@
+model_list:
+  - model_name: mistral-small
+    litellm_params:
+      model: mistral/mistral-small
+      api_key: ${MISTRAL_API_KEY}
+  
+  - model_name: mistral-medium
+    litellm_params:
+      model: mistral/mistral-medium
+      api_key: ${MISTRAL_API_KEY}
+  
+  - model_name: mistral-large
+    litellm_params:
+      model: mistral/mistral-large
+      api_key: ${MISTRAL_API_KEY}
+
+# Fallback models if the primary model fails
+fallbacks:
+  - mistral-small:
+    - mistral-medium
+  - mistral-medium:
+    - mistral-large
+  - mistral-large:
+    - mistral-medium
+
+# Routing configuration
+router:
+  timeout: 60
+  retry_count: 5
+  routing_strategy: simple-shuffle
+
+# Logging configuration
+logging:
+  level: info
+
+# Environment variables
+environment_variables:
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY}

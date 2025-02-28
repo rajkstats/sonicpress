@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policymap [
+  <!ELEMENT policymap (policy)+>
+  <!ATTLIST policymap xmlns CDATA #FIXED ''>
+  <!ELEMENT policy EMPTY>
+  <!ATTLIST policy xmlns CDATA #FIXED '' domain NMTOKEN #REQUIRED
+    name NMTOKEN #IMPLIED pattern CDATA #IMPLIED rights NMTOKEN #IMPLIED
+    stealth NMTOKEN #IMPLIED value CDATA #IMPLIED>
+]>
+<policymap>
+  <!-- Set resource limits -->
+  <policy domain="resource" name="memory" value="8GiB"/>
+  <policy domain="resource" name="map" value="4GiB"/>
+  <policy domain="resource" name="width" value="100KP"/>
+  <policy domain="resource" name="height" value="100KP"/>
+  <policy domain="resource" name="area" value="1GP"/>
+  <policy domain="resource" name="disk" value="8GiB"/>
+  <policy domain="resource" name="file" value="768"/>
+  <policy domain="resource" name="thread" value="4"/>
+  <policy domain="resource" name="throttle" value="0"/>
+  <policy domain="resource" name="time" value="3600"/>
+  
+  <!-- Allow all operations for common formats -->
+  <policy domain="coder" rights="read|write" pattern="*" />
+  
+  <!-- Specifically allow PDF operations -->
+  <policy domain="coder" rights="read|write" pattern="PDF" />
+  <policy domain="coder" rights="read|write" pattern="XPS" />
+  
+  <!-- Allow reading from paths that start with @ -->
+  <policy domain="path" rights="read|write" pattern="@*" />
+  
+  <!-- Allow reading from files -->
+  <policy domain="module" rights="read|write" pattern="{PS,PDF,XPS}" />
+  
+  <!-- Disable security policies that might block operations -->
+  <policy domain="delegate" rights="read|write" pattern="*" />
+  <policy domain="filter" rights="read|write" pattern="*" />
+  <policy domain="coder" rights="read|write" pattern="*" />
+</policymap> 

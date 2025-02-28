@@ -1,5 +1,19 @@
-import io
+import sys
 import os
+from pathlib import Path
+
+# Add the docker directory to the path so we can import the patch
+docker_path = str(Path(__file__).parent.parent / "docker")
+sys.path.append(docker_path)
+
+# Import the MoviePy patch to fix ImageMagick issues
+try:
+    import moviepy_patch
+    print(f"Successfully imported MoviePy patch from {docker_path}")
+except ImportError as e:
+    print(f"Warning: MoviePy patch not found or error importing: {e}")
+
+import io
 import json
 import asyncio
 import requests
@@ -8,35 +22,57 @@ from google.cloud import storage
 from pydub import AudioSegment
 from exa_py import Exa
 from litellm import completion as chat_completion
-from moviepy.editor import (
-    ColorClip, TextClip, AudioFileClip,
-    CompositeVideoClip, ImageClip
-)
+
+# Ensure PIL.Image.ANTIALIAS is available before importing MoviePy
 from PIL import Image, UnidentifiedImageError
 try:
     from PIL.Image import Resampling  # Import the newer Resampling enum
 except ImportError:
     # Fallback for older PIL versions
     pass
+
+# Ensure PIL.Image.ANTIALIAS is available
+if not hasattr(Image, "ANTIALIAS"):
+    try:
+        # For newer PIL versions
+        Image.ANTIALIAS = Image.Resampling.LANCZOS
+        print("Set PIL.Image.ANTIALIAS to Image.Resampling.LANCZOS")
+    except AttributeError:
+        # For very old PIL versions
+        Image.ANTIALIAS = Image.LANCZOS
+        print("Set PIL.Image.ANTIALIAS to Image.LANCZOS")
+
+# Import MoviePy components
+print("Importing MoviePy components...")
+from moviepy.editor import (
+    ColorClip, TextClip, AudioFileClip,
+    CompositeVideoClip, ImageClip
+)
+print("MoviePy components imported successfully")
+
 import numpy as np
 from proglog import ProgressBarLogger
 import math
 import re
 from io import BytesIO
 from urllib.parse import urlparse
+import time
 
 # Patch MoviePy's ImageClip to handle PIL.Image.ANTIALIAS deprecation
-# This needs to be done before any ImageClip is created
-import moviepy.video.VideoClip as VideoClip
-original_resize = VideoClip.ImageClip.resize
-
-def patched_resize(self, newsize=None, height=None, width=None, apply_to_mask=True):
-    """Patched resize method to handle PIL.Image.ANTIALIAS deprecation"""
-    try:
-        return original_resize(self, newsize, height, width, apply_to_mask)
-    except AttributeError as e:
-        if "ANTIALIAS" in str(e):
-            # Monkey patch PIL.Image.ANTIALIAS at runtime
+# This is a direct monkey patch approach that doesn't rely on accessing the original method
+try:
+    print("Applying patch for MoviePy's ImageClip.resize...")
+    
+    # Store the original method if we haven't already
+    if not hasattr(ImageClip, '_original_resize'):
+        # Define a completely new resize method
+        def patched_resize(self, newsize=None, height=None, width=None, apply_to_mask=True):
+            """
+            Resizes the clip to the given dimensions. Accepts float numbers.
+            
+            This is a patched version that handles PIL.Image.ANTIALIAS deprecation.
+            """
+            # Ensure PIL.Image.ANTIALIAS is available
             if not hasattr(Image, "ANTIALIAS"):
                 try:
                     # For newer PIL versions
@@ -44,13 +80,71 @@ def patched_resize(self, newsize=None, height=None, width=None, apply_to_mask=Tr
                 except AttributeError:
                     # For very old PIL versions
                     Image.ANTIALIAS = Image.LANCZOS
-            # Try again with the patched attribute
-            return original_resize(self, newsize, height, width, apply_to_mask)
-        else:
-            raise
-
-# Apply the patch
-VideoClip.ImageClip.resize = patched_resize
+            
+            # Implementation based on the original resize method
+            w, h = self.size
+            
+            if newsize:
+                # Handle case where newsize might be a tuple
+                if isinstance(newsize, tuple):
+                    w2, h2 = newsize
+                else:
+                    w2 = newsize[0] if isinstance(newsize, (list, tuple)) else newsize
+                    h2 = newsize[1] if isinstance(newsize, (list, tuple)) and len(newsize) > 1 else h * w2 / w
+            else:
+                if width:
+                    w2 = width
+                    h2 = w2 * h / w
+                elif height:
+                    h2 = height
+                    w2 = w * h2 / h
+                else:
+                    raise ValueError("Either newsize, width, or height must be provided")
+            
+            # Make sure the size is integer
+            try:
+                w2 = int(w2)
+                h2 = int(h2)
+            except (ValueError, TypeError) as e:
+                print(f"Error converting size to integer: w2={w2}, h2={h2}, error={e}")
+                # Fallback to original size if conversion fails
+                w2, h2 = w, h
+            
+            # Ensure minimum size
+            w2 = max(1, w2)
+            h2 = max(1, h2)
+            
+            # Actual resizing using PIL
+            try:
+                img_resized = self.img.resize((w2, h2), Image.ANTIALIAS)
+            except Exception as e:
+                print(f"Error resizing image: {e}")
+                # Fallback to nearest neighbor if ANTIALIAS fails
+                img_resized = self.img.resize((w2, h2))
+            
+            # Create a new clip with the resized image
+            new_clip = self.copy()
+            new_clip.img = img_resized
+            new_clip.size = (w2, h2)
+            
+            if apply_to_mask and self.mask:
+                try:
+                    new_clip.mask = self.mask.resize((w2, h2))
+                except Exception as e:
+                    print(f"Error resizing mask: {e}")
+                    # If mask resize fails, create a new mask of the right size
+                    new_clip.mask = None
+            
+            return new_clip
+        
+        # Save the original method and apply our patch
+        ImageClip._original_resize = getattr(ImageClip, 'resize', None)
+        ImageClip.resize = patched_resize
+        print("Applied patch to MoviePy's ImageClip.resize method")
+    else:
+        print("MoviePy's ImageClip.resize already patched")
+except Exception as e:
+    print(f"Failed to apply patch to ImageClip.resize: {e}")
 
 from .config import (
     EXA_API_KEY,
@@ -93,25 +187,37 @@ class NewsAgent:
                 preferences = json.loads(preferences)
 
             search_results = []
-            # If the 1-day window yields no results, broaden to 3 or 7 days
-            # Or do it directly with preferences["date"] usage:
-            #   start_published_date = preferences["date"]  # or a derived date
-            # For demonstration, we use the same approach as original
+            
             for category in preferences["categories"]:
-                query_response = chat_completion(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Generate a search query in English only. Respond with ONLY the query text."
-                        },
-                        {"role": "user", "content": f"Latest news about: {category}"}
-                    ],
-                    model=model,
-                    temperature=0.7
-                )
-                search_query = query_response.choices[0].message.content.strip()
-                print(f"\nSearching for: {search_query}")
-
+                # Add retry logic for rate limit errors
+                max_retries = 3
+                retry_delay = 2  # seconds
+                
+                for retry_count in range(max_retries):
+                    try:
+                        query_response = chat_completion(
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "Generate a search query in English only. Respond with ONLY the query text."
+                                },
+                                {"role": "user", "content": f"Latest news about: {category}"}
+                            ],
+                            model=model,
+                            temperature=0.7
+                        )
+                        search_query = query_response.choices[0].message.content.strip()
+                        print(f"\nSearching for: {search_query}")
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        if "rate limit" in str(e).lower() and retry_count < max_retries - 1:
+                            print(f"Rate limit error, retrying in {retry_delay} seconds... ({retry_count + 1}/{max_retries})")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            # If it's not a rate limit error or we've exhausted retries, re-raise
+                            raise
+                
                 # Convert user-provided date (like "2023-10-01") to datetime object
                 # or fallback to last 7 days if 1 day is empty
                 date_str = preferences.get("date")
@@ -122,52 +228,115 @@ class NewsAgent:
                     # fallback
                     start_date = datetime.now() - timedelta(days=7)
 
-                # You can pass an explicit 'livecrawl' param if needed:
-                # e.g., livecrawl="always" to force Exa to re-fetch
-                # But note it's slower
-                search_response = self.exa.search_and_contents(
-                    search_query,
-                    text=True,
-                    num_results=preferences.get("num_results", 2),
-                    start_published_date=start_date.strftime("%Y-%m-%d"),
-                    category='news',
-                    # livecrawl="auto",   # or "always", "never"
-                )
+                # Add retry logic for Exa API calls
+                max_exa_retries = 3
+                exa_retry_delay = 2  # seconds
+                
+                for exa_retry_count in range(max_exa_retries):
+                    try:
+                        # You can pass an explicit 'livecrawl' param if needed:
+                        # e.g., livecrawl="always" to force Exa to re-fetch
+                        # But note it's slower
+                        search_response = self.exa.search_and_contents(
+                            search_query,
+                            text=True,
+                            num_results=preferences.get("num_results", 3),  # Use user preference with default of 3
+                            start_published_date=start_date.strftime("%Y-%m-%d"),
+                            # Remove category restriction to get more diverse results
+                            # category='news',
+                            # livecrawl="auto",   # or "always", "never"
+                        )
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        if ("rate limit" in str(e).lower() or "429" in str(e)) and exa_retry_count < max_exa_retries - 1:
+                            print(f"Exa API rate limit error, retrying in {exa_retry_delay} seconds... ({exa_retry_count + 1}/{max_exa_retries})")
+                            time.sleep(exa_retry_delay)
+                            exa_retry_delay *= 2  # Exponential backoff
+                        else:
+                            # If it's not a rate limit error or we've exhausted retries, re-raise
+                            raise
 
                 summarized_articles = []
                 for result in search_response.results:
                     if not result.text:
                         continue
 
-                    summary_response = chat_completion(
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": """You are a news summarizer. Create a single-sentence news summary that:
-                                        - Uses exactly 20-30 words
-                                        - No markdown, bullets, or special formatting
-                                        - Simple present tense
-                                        - Focus on the single most important fact
-                                        - Must be in plain text format
-                                        - Must be in English
-                                        """
-                            },
-                            {
-                                "role": "user",
-                                "content": result.text
-                            }
-                        ],
-                        model=model,
-                        temperature=0.7
-                    )
-
-                    summarized_articles.append({
-                        "title": result.title,
-                        "summary": summary_response.choices[0].message.content.strip(),
-                        "source": result.url,
-                        "date": getattr(result, 'published_date', None)
-                    })
-
+                    # Add retry logic for summarization
+                    max_summary_retries = 3
+                    summary_retry_delay = 2  # seconds
+                    
+                    for summary_retry_count in range(max_summary_retries):
+                        try:
+                            summary_response = chat_completion(
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": """You are a news summarizer. Create a single-sentence news summary that:
+                                                - Uses exactly 20-30 words
+                                                - No markdown, bullets, or special formatting
+                                                - Simple present tense
+                                                - Focus on the single most important fact
+                                                - Must be in plain text format
+                                                - Must be in English
+                                                """
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": result.text
+                                    }
+                                ],
+                                model=model,
+                                temperature=0.7
+                            )
+                            
+                            # Determine content type based on URL and content
+                            content_type = "general"  # Default content type
+                            url = result.url.lower()
+                            
+                            # News sites typically have /news/ in URL or are known domains
+                            if ("/news/" in url or 
+                                any(domain in url for domain in ["cnn.com", "bbc.com", "reuters.com", "nytimes.com", 
+                                                               "theverge.com", "techcrunch.com", "wired.com"])):
+                                content_type = "news"
+                            
+                            # Documentation pages
+                            elif ("/docs/" in url or "/documentation/" in url or 
+                                 any(domain in url for domain in ["docs.github.com", "readthedocs.io", "docs.python.org"])):
+                                content_type = "documentation"
+                            
+                            # Reference sites like Wikipedia
+                            elif "wikipedia.org" in url or "investopedia.com" in url:
+                                content_type = "reference"
+                            
+                            # Social media
+                            elif any(domain in url for domain in ["twitter.com", "x.com", "linkedin.com", "facebook.com", 
+                                                                "reddit.com", "medium.com", "substack.com"]):
+                                content_type = "social"
+                            
+                            # Video content
+                            elif any(domain in url for domain in ["youtube.com", "vimeo.com", "twitch.tv"]):
+                                content_type = "video"
+                            
+                            # Log the content type classification
+                            print(f"Classified {result.title[:30]}... as {content_type}")
+                            
+                            summarized_articles.append({
+                                "title": result.title,
+                                "summary": summary_response.choices[0].message.content.strip(),
+                                "source": result.url,
+                                "date": getattr(result, 'published_date', None),
+                                "content_type": content_type  # Add content type to the article data
+                            })
+                            break  # Success, exit retry loop
+                        except Exception as e:
+                            if "rate limit" in str(e).lower() and summary_retry_count < max_summary_retries - 1:
+                                print(f"Rate limit error during summarization, retrying in {summary_retry_delay} seconds... ({summary_retry_count + 1}/{max_summary_retries})")
+                                time.sleep(summary_retry_delay)
+                                summary_retry_delay *= 2  # Exponential backoff
+                            else:
+                                # If it's not a rate limit error or we've exhausted retries, re-raise
+                                raise
+                
                 if summarized_articles:
                     search_results.append({
                         "title": category,
@@ -949,12 +1118,19 @@ class NewsAgent:
                 img_path = images_for_articles[i] if i < len(images_for_articles) else None
                 if img_path and os.path.exists(img_path):
                     try:
-                        img_clip = ImageClip(img_path)
+                        # Load the image using PIL first to avoid numpy array reference issues
+                        pil_img = Image.open(img_path).convert("RGB")
+                        # Create a fresh ImageClip from the PIL image
+                        img_clip = ImageClip(np.array(pil_img))
+                        
                         # Force max 600×338
                         iw, ih = img_clip.size
                         scale = min(600/iw, 338/ih) if (iw>600 or ih>338) else 1
                         new_w, new_h = int(iw*scale), int(ih*scale)
-                        img_clip = img_clip.resize((new_w, new_h))
+                        
+                        # Resize using PIL instead of MoviePy's resize method
+                        resized_pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
+                        img_clip = ImageClip(np.array(resized_pil_img))
                         
                         # Calculate positions for a structured layout
                         # 1. Headline at top (already positioned at y=80)
@@ -984,8 +1160,9 @@ class NewsAgent:
                             all_clips.pop()  # Remove the last added clip (the original image)
                             image_clips_added -= 1  # Decrement the counter since we removed a clip
                             
-                            # Create a new resized clip
-                            img_clip = ImageClip(img_path).resize((new_w, new_h))
+                            # Create a new resized clip using PIL
+                            resized_pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
+                            img_clip = ImageClip(np.array(resized_pil_img))
                             img_clip = img_clip.set_position(("center", image_y)) \
                                             .set_start(start_time) \
                                             .set_duration(segment_duration)

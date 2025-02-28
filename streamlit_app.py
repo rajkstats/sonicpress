@@ -10,12 +10,71 @@ import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
 from googleapiclient.http import MediaFileUpload
+import requests
 
 # Load .env variables (for agent credentials)
 load_dotenv(override=True)
 
 # Import your NewsAgent (ensure agentic_news is installed or adjust as needed)
 from agentic_news.agent import NewsAgent
+
+# Add API connectivity testing functions
+def test_mistral_connectivity():
+    """Test connectivity to the Mistral API."""
+    api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+    if not api_key:
+        return False, "MISTRAL_API_KEY environment variable not set"
+    
+    url = "https://api.mistral.ai/v1/models"
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return True, "Connected successfully"
+        else:
+            return False, f"API returned status code {response.status_code}: {response.text[:100]}"
+    except Exception as e:
+        return False, f"Error connecting to Mistral API: {str(e)}"
+
+def test_exa_connectivity():
+    """Test connectivity to the Exa API."""
+    api_key = os.environ.get("EXA_API_KEY", "").strip()
+    if not api_key:
+        return False, "EXA_API_KEY environment variable not set"
+    
+    url = "https://api.exa.ai/search"
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "query": "test query",
+        "numResults": 1
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code == 200:
+            return True, "Connected successfully"
+        else:
+            return False, f"API returned status code {response.status_code}: {response.text[:100]}"
+    except Exception as e:
+        return False, f"Error connecting to Exa API: {str(e)}"
+
+# Function to check all required APIs
+def check_api_connectivity():
+    mistral_success, mistral_message = test_mistral_connectivity()
+    exa_success, exa_message = test_exa_connectivity()
+    
+    return {
+        "mistral": {"success": mistral_success, "message": mistral_message},
+        "exa": {"success": exa_success, "message": exa_message},
+        "all_success": mistral_success and exa_success
+    }
 
 ################################################################################
 # PAGE CONFIG AND NYTIMES-STYLE CSS
@@ -353,9 +412,9 @@ agent = get_agent()
 ################################################################################
 
 DEFAULT_CATEGORIES = [
-    "Tech and Innovation", "Business and Finance", "Science and Space",
-    "World News", "Sports", "Entertainment", "Health and Medicine",
-    "Climate and Environment", "Politics", "Education",
+            "Tech and Innovation", "Business and Finance", "Science and Space",
+            "World News", "Sports", "Entertainment", "Health and Medicine",
+            "Climate and Environment", "Politics", "Education",
     "Artificial Intelligence", "Cryptocurrency", "Gaming"
 ]
 
@@ -515,10 +574,10 @@ if "show_video" in st.session_state and st.session_state.show_video:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown('<div style="padding: 0; text-align: center;">', unsafe_allow_html=True)
-            st.download_button(
+                    st.download_button(
                 label="DOWNLOAD VIDEO",
-                data=open(video_path, "rb"),
-                file_name="sonicpress_news.mp4",
+                        data=open(video_path, "rb"),
+                        file_name="sonicpress_news.mp4",
                 mime="video/mp4",
                 use_container_width=True
             )
@@ -566,11 +625,14 @@ if compile_button:
     if not categories or (use_custom_topic and not custom_query and not additional_cats):
         st.warning("Please enter a topic or select categories in the sidebar.")
     else:
-        # Show a progress bar
+        # First check API connectivity
         with progress_container:
             progress_bar = st.progress(0)
             status_placeholder = st.empty()
-            status_placeholder.info("Gathering your personalized news...")
+            status_placeholder.info("Starting your personalized news briefing...")
+            
+            # Skip API connectivity check since we're using the LiteLLM Proxy
+            progress_bar.progress(5)
 
         try:
             # 1) Build preferences
@@ -589,10 +651,33 @@ if compile_button:
             # 2) Fetch & Summarize
             status_placeholder.info("Fetching relevant articles... (Powered by Exa)")
             summaries = agent.fetch_and_summarize(prefs)
+            
+            # If no articles found, try with a broader date range
             if not summaries:
-                status_placeholder.warning("No articles found. Try more general topics or a broader date range.")
-                st.stop()
-
+                status_placeholder.info("No articles found. Trying with a broader date range...")
+                broader_prefs = prefs.copy()
+                broader_prefs["date"] = (datetime.now() - timedelta(days=days_ago * 2)).strftime("%Y-%m-%d")
+                summaries = agent.fetch_and_summarize(broader_prefs)
+                
+                # If still no articles, try with an even broader date range
+                if not summaries:
+                    status_placeholder.info("Still no articles found. Trying with an even broader date range...")
+                    broader_prefs["date"] = (datetime.now() - timedelta(days=days_ago * 4)).strftime("%Y-%m-%d")
+                    summaries = agent.fetch_and_summarize(broader_prefs)
+                    
+                    # If still no articles, try with a more general query
+                    if not summaries and len(categories) == 1:
+                        status_placeholder.info("Still no articles found. Trying with a more general query...")
+                        more_general_prefs = broader_prefs.copy()
+                        # Add a more general category if the user provided a specific one
+                        if categories[0] not in DEFAULT_CATEGORIES:
+                            more_general_prefs["categories"] = ["Tech and Innovation"] + categories
+                            summaries = agent.fetch_and_summarize(more_general_prefs)
+                    
+                    if not summaries:
+                        status_placeholder.warning("No articles found. Try more general topics or a broader date range.")
+                        st.stop()
+            
             st.session_state.fetched_summaries = summaries
             time.sleep(0.4)
             progress_bar.progress(40)
@@ -627,8 +712,8 @@ if compile_button:
             
             # Force a rerun to display the video at the top
             st.rerun()
-                    
-        except Exception as e:
+
+    except Exception as e:
             progress_container.error(f"Something went wrong: {e}")
 
 # Display Headlines & Highlights when summaries exist

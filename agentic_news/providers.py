@@ -158,14 +158,17 @@ class LiteLLMBaseProvider(OpenAIBaseProvider):
 class LiteLLMProvider(LiteLLMBaseProvider):
     """Universal provider for all LLM models using LiteLLM"""
 
+    # Proxy URL - can be overridden with environment variable
+    PROXY_URL = os.environ.get("LITELLM_PROXY_URL", "http://localhost:8080")
+
     TEXT_MODELS = {
         "llama3.3": {
             "groq": "groq/llama-3.3-70b-versatile",
             "fireworks": "fireworks/llama-v3p3-70b-instruct",
         },
-        "small": "mistral/mistral-small-latest",
-        "medium": "mistral/mistral-medium-latest",
-        "large": "mistral/mistral-large-latest",
+        "small": "mistral-small",  # Use proxy model names
+        "medium": "mistral-medium",  # Use proxy model names
+        "large": "mistral-large",  # Use proxy model names
         "gpt-4": "openai/gpt-4-turbo-preview",
         "claude-3-opus": "anthropic/claude-3-opus-20240229",
         "claude-3-sonnet": "anthropic/claude-3-5-sonnet-20241022",
@@ -190,6 +193,27 @@ class LiteLLMProvider(LiteLLMBaseProvider):
 
     def __init__(self, model, provider=None):
         model_info = self.aliases.get(model)
+        
+        # If using proxy, simplify model handling
+        if self.PROXY_URL:
+            if isinstance(model_info, dict):
+                if not provider:
+                    provider = next(iter(model_info))
+                self.model = model_info[provider]
+            else:
+                self.model = model_info or model
+            
+            # Print proxy information
+            print(f"Using LiteLLMProvider with {self.model} via proxy at {self.PROXY_URL}")
+            
+            # Set API key to None as it will be handled by the proxy
+            self.api_key = None
+            
+            # Initialize with proxy settings
+            super(LiteLLMBaseProvider, self).__init__(self.model)
+            return
+        
+        # Original initialization for direct API access
         if isinstance(model_info, dict):
             if not provider:
                 provider = next(iter(model_info))
@@ -215,6 +239,38 @@ class LiteLLMProvider(LiteLLMBaseProvider):
         self.api_key = os.getenv(f"{provider_name.upper()}_API_KEY")
         super().__init__(self.model)
 
+    def completion(self, messages, **kwargs):
+        """Get a completion from the LLM API."""
+        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        
+        # If using proxy, add api_base parameter
+        if self.PROXY_URL:
+            filtered_kwargs["api_base"] = self.PROXY_URL
+            
+            # Handle different message formats
+            if isinstance(messages, str):
+                # Convert string to messages format
+                filtered_kwargs["messages"] = [{"role": "user", "content": messages}]
+            else:
+                filtered_kwargs["messages"] = messages
+                
+            try:
+                completion_response = self.client(
+                    model=self.model,
+                    **filtered_kwargs,
+                )
+                return completion_response
+            except Exception as e:
+                print(f"Error with LiteLLM Proxy: {e}")
+                # Fall back to direct API if proxy fails
+                if "api_base" in filtered_kwargs:
+                    del filtered_kwargs["api_base"]
+                # Try direct API call
+                return super().completion(messages, **filtered_kwargs)
+        
+        # Original completion method for direct API access
+        return super().completion(messages, **filtered_kwargs)
+
     @classmethod
     def get_text_models(cls):
         """Get list of available text-only models"""
@@ -226,4 +282,4 @@ class LiteLLMProvider(LiteLLMBaseProvider):
         model_info = cls.aliases.get(model)
         if isinstance(model_info, dict):
             return list(model_info.keys())
-        return [model_info.split("/")[0]] if model_info else [] 
+        return [model_info.split("/")[0]] if model_info else []

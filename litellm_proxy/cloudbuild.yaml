@@ -1,0 +1,35 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/litellm-proxy:$COMMIT_SHA', '.']
+    dir: 'litellm_proxy'
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/litellm-proxy:$COMMIT_SHA']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'litellm-proxy'
+      - '--image=gcr.io/$PROJECT_ID/litellm-proxy:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--min-instances=1'
+      - '--max-instances=10'
+      - '--timeout=3600'
+      - '--set-env-vars=MISTRAL_API_KEY=${_MISTRAL_API_KEY}'
+      - '--allow-unauthenticated'
+
+# Substitutions for environment variables
+substitutions:
+  _MISTRAL_API_KEY: '' # Set this in the Cloud Build trigger
+
+# Only store logs, not the artifacts
+options:
+  logging: CLOUD_LOGGING_ONLY 
