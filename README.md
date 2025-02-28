@@ -4,7 +4,9 @@ Your Personalized NewsBriefing - Built for ElevenLabs x a16z AI Agents Hackathon
 
 ##  Demo
 
-https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
+![SonicPress Demo Thumbnail](/agentic-news/mistral_thumbnail.png)
+
+![SonicPress Demo Headlines and Highlights](/agentic-news/mistral_headlines_highlights.png)
 
 ### Voice Examples
 
