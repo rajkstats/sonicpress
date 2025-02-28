@@ -6,6 +6,23 @@ Your Personalized NewsBriefing - Built for ElevenLabs x a16z AI Agents Hackathon
 
 https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
 
+### Voice Examples
+
+- **🌅 Morning Calm**: 
+
+https://github.com/user-attachments/assets/b6117fde-9b9f-4b12-8095-6ff26aba98ed
+
+
+- **🌙 Evening Energetic**: 
+
+
+https://github.com/user-attachments/assets/75e78d21-d386-45c6-b06b-c61e07b9dc1b
+
+- **⚡ Breaking Urgent**: 
+
+https://github.com/user-attachments/assets/bb1037e5-30d4-4f49-8fb0-82826335f071
+
+
 ## Features
 
 - **Personalized News Aggregation**: Multi-category news curation with custom topic support
