@@ -541,3 +541,8 @@ Built for the ElevenLabs x a16z AI Agents Hackathon 2025, focusing on:
 - Mistral AI for language processing
 - Exa for news search API
 - Google Cloud Platform for infrastructure 
+
+## 👨‍💻 Contributors
+
+- Raghav Gupta
+- Hrishabh Bhargava 
