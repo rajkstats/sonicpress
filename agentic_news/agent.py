@@ -144,13 +144,13 @@ class NewsAgent:
                             {
                                 "role": "system",
                                 "content": """You are a news summarizer. Create a single-sentence news summary that:
-- Uses exactly 20-30 words
-- No markdown, bullets, or special formatting
-- Simple present tense
-- Focus on the single most important fact
-- Must be in plain text format
-- Must be in English
-"""
+                                        - Uses exactly 20-30 words
+                                        - No markdown, bullets, or special formatting
+                                        - Simple present tense
+                                        - Focus on the single most important fact
+                                        - Must be in plain text format
+                                        - Must be in English
+                                        """
                             },
                             {
                                 "role": "user",
