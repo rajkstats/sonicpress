@@ -20,6 +20,82 @@ https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
 - **Modern Web Interface**: Streamlit-based UI with NYTimes-inspired styling
 - **Cloud-Ready**: Optimized for Google Cloud Run deployment
 
+## System Architecture
+
+The SonicPress system uses an agentic approach with asynchronous tool calls to generate personalized news content:
+
+```mermaid
+graph TD
+    %% Main components
+    A([User]) --> B[Streamlit UI]
+    B --> C{{NewsAgent}}
+    
+    %% Core agent loop
+    C --> D([Start Loop])
+    D --> E[Call LLM]
+    E --> F{Tool Calls?}
+    
+    %% Decision branches
+    F -->|Yes| G([Execute Tool])
+    F -->|No| H([Final Processing])
+    
+    %% Tool types
+    G --> J1[Get Preferences]
+    G --> J2[Fetch News]
+    G --> J3[Generate Script]
+    G --> J4[Text to Speech]
+    G --> J5[Upload Audio]
+    
+    %% External services
+    J2 --> K1[(Exa API)]
+    J4 --> K2[(ElevenLabs API)]
+    E --> K3[(Mistral AI)]
+    
+    %% Results flow back to loop
+    G --> I[Store Results]
+    I --> D
+    
+    %% Final processing
+    H --> L{Audio Exists?}
+    L -->|Yes| M[Generate Video]
+    L -->|No| N[Display Results]
+    
+    %% Video generation and storage
+    M --> O[(Video File)]
+    J5 --> P[(Cloud Storage)]
+    O --> P
+    
+    %% Results back to UI
+    N --> B
+    P --> B
+    
+    %% Styling
+    classDef user fill:#f0f4f8,stroke:#4a6fa5,stroke-width:2px
+    classDef ui fill:#d1e7dd,stroke:#198754,stroke-width:2px
+    classDef agent fill:#e6c6f7,stroke:#8a4ad4,stroke-width:2px
+    classDef process fill:#fff3cd,stroke:#ffc107,stroke-width:1px
+    classDef decision fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+    classDef api fill:#cff4fc,stroke:#0dcaf0,stroke-width:1px
+    classDef storage fill:#e2e3e5,stroke:#6c757d,stroke-width:1px
+    
+    class A user
+    class B ui
+    class C agent
+    class D,G,H,I,J1,J2,J3,J4,J5,M,N process
+    class F,L decision
+    class K1,K2,K3,O,P storage
+```
+
+The flowchart illustrates the complete system architecture:
+
+1. **User Interaction**: Users input preferences through the Streamlit web interface
+2. **Agent Loop**: The NewsAgent runs a loop that checks for tool calls and executes them
+3. **Decision Points**: The system makes decisions based on tool call availability and type
+4. **Tool Execution**: Different tools handle specific tasks (fetching news, generating scripts, etc.)
+5. **External Services**: Integration with ElevenLabs for voice, Mistral AI for text, and Exa for search
+6. **Final Processing**: After completing all tool calls, the system generates video if audio exists
+7. **Cloud Storage**: Media files are stored in Google Cloud Storage and served to the UI
+
 ## 🛠️ Tech Stack
 
 - **Core**: Python 3.11+, Poetry
