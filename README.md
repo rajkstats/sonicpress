@@ -25,76 +25,122 @@ https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
 The SonicPress system uses an agentic approach with asynchronous tool calls to generate personalized news content:
 
 ```mermaid
-graph TD
-    %% Main components
-    A([User]) --> B[Streamlit UI]
-    B --> C{{NewsAgent}}
+flowchart TD
+    %% User interaction and Streamlit
+    User([User]) --> StreamlitUI[Streamlit Web UI]
+    StreamlitUI --> UserQuery[User Query Input]
     
-    %% Core agent loop
-    C --> D([Start Loop])
-    D --> E[Call LLM]
-    E --> F{Tool Calls?}
+    %% Main agent flow
+    UserQuery --> InitSystem[Initialize Chat History with System Prompt]
+    InitSystem --> StartLoop[Start Loop]
     
-    %% Decision branches
-    F -->|Yes| G([Execute Tool])
-    F -->|No| H([Final Processing])
+    StartLoop --> CallLLM[Call LiteLLM via Proxy API]
+    CallLLM --> HasToolCalls{Has Tool Calls?}
     
-    %% Tool types
-    G --> J1[Get Preferences]
-    G --> J2[Fetch News]
-    G --> J3[Generate Script]
-    G --> J4[Text to Speech]
-    G --> J5[Upload Audio]
+    HasToolCalls -->|Yes| ExtractToolDetails[Extract Tool Call Details]
+    HasToolCalls -->|No| ExtractFinalContents[Extract Final Contents]
     
-    %% External services
-    J2 --> K1[(Exa API)]
-    J4 --> K2[(ElevenLabs API)]
-    E --> K3[(Mistral AI)]
+    ExtractToolDetails --> ToolType{Tool Type}
     
-    %% Results flow back to loop
-    G --> I[Store Results]
-    I --> D
+    ToolType -->|get_preferences| GetPreferences[Call get_preferences]
+    ToolType -->|fetch_and_summarize| FetchNews[Call fetch_and_summarize via Exa API]
+    ToolType -->|generate_news_script| GenScript[Call generate_news_script]
+    ToolType -->|text_to_speech| TextToSpeech[Call text_to_speech via ElevenLabs]
+    ToolType -->|upload_audio| UploadAudio[Call upload_audio to GCS]
     
-    %% Final processing
-    H --> L{Audio Exists?}
-    L -->|Yes| M[Generate Video]
-    L -->|No| N[Display Results]
+    GetPreferences --> StorePreferences[Store Preferences in State]
+    FetchNews --> StoreSummaries[Store Summaries in State]
+    GenScript --> StoreScript[Store Script in State]
+    TextToSpeech --> StoreAudio[Store Audio Path in State]
+    UploadAudio --> StoreAudioURL[Store Audio URL in State]
     
-    %% Video generation and storage
-    M --> O[(Video File)]
-    J5 --> P[(Cloud Storage)]
-    O --> P
+    StorePreferences --> UpdateHistory[Update Chat History with Function Result]
+    StoreSummaries --> UpdateHistory
+    StoreScript --> UpdateHistory
+    StoreAudio --> UpdateHistory
+    StoreAudioURL --> UpdateHistory
+    
+    UpdateHistory --> StartLoop
+    
+    ExtractFinalContents --> CheckForVideo[Check if Audio Exists for Video]
+    CheckForVideo --> VideoNeeded{Need Video?}
+    
+    VideoNeeded -->|Yes| GenerateVideo[Generate Video with MoviePy & FFmpeg]
+    VideoNeeded -->|No| DisplayResults[Display Results]
+    
+    GenerateVideo --> StoreVideo[Store Video Path in State]
+    StoreVideo --> DisplayResults
     
     %% Results back to UI
-    N --> B
-    P --> B
+    DisplayResults --> StreamlitUI
+    
+    %% Cloud Run deployment
+    subgraph CloudRun[Google Cloud Run]
+        direction TB
+        StreamlitUI
+        UserQuery
+        InitSystem
+        StartLoop
+        CallLLM
+        HasToolCalls
+        ExtractToolDetails
+        ToolType
+        GetPreferences
+        FetchNews
+        GenScript
+        TextToSpeech
+        UploadAudio
+        StorePreferences
+        StoreSummaries
+        StoreScript
+        StoreAudio
+        StoreAudioURL
+        UpdateHistory
+        ExtractFinalContents
+        CheckForVideo
+        VideoNeeded
+        GenerateVideo
+        StoreVideo
+        DisplayResults
+    end
+    
+    %% External storage
+    UploadAudio --> GCS[(Google Cloud Storage)]
+    StoreVideo --> GCS
+    GCS --> StreamlitUI
     
     %% Styling
-    classDef user fill:#f0f4f8,stroke:#4a6fa5,stroke-width:2px
-    classDef ui fill:#d1e7dd,stroke:#198754,stroke-width:2px
-    classDef agent fill:#e6c6f7,stroke:#8a4ad4,stroke-width:2px
-    classDef process fill:#fff3cd,stroke:#ffc107,stroke-width:1px
-    classDef decision fill:#f8d7da,stroke:#dc3545,stroke-width:2px
-    classDef api fill:#cff4fc,stroke:#0dcaf0,stroke-width:1px
-    classDef storage fill:#e2e3e5,stroke:#6c757d,stroke-width:1px
+    style CallLLM fill:#f9c6e5,stroke:#d44a7a,stroke-width:2px
+    style HasToolCalls fill:#ffe066,stroke:#d4a44a,stroke-width:2px
+    style ToolType fill:#ffe066,stroke:#d4a44a,stroke-width:2px
+    style VideoNeeded fill:#ffe066,stroke:#d4a44a,stroke-width:2px
     
-    class A user
-    class B ui
-    class C agent
-    class D,G,H,I,J1,J2,J3,J4,J5,M,N process
-    class F,L decision
-    class K1,K2,K3,O,P storage
+    style GetPreferences fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    style FetchNews fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    style GenScript fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    style TextToSpeech fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    style UploadAudio fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    style GenerateVideo fill:#c6d9f7,stroke:#4a6da7,stroke-width:2px
+    
+    style ExtractToolDetails fill:#f0f0f0,stroke:#333,stroke-width:2px
+    style ExtractFinalContents fill:#a8e6cf,stroke:#3a8f5d,stroke-width:2px
+    style DisplayResults fill:#a8e6cf,stroke:#3a8f5d,stroke-width:2px
+    
+    style StreamlitUI fill:#61dafb,stroke:#2d8bba,stroke-width:2px
+    style CloudRun fill:#f1f8ff,stroke:#4285f4,stroke-width:2px
+    style GCS fill:#c6f7d6,stroke:#4aa76d,stroke-width:2px
 ```
 
 The flowchart illustrates the complete system architecture:
 
-1. **User Interaction**: Users input preferences through the Streamlit web interface
+1. **User Interaction**: Users interact with the Streamlit web interface to input preferences
 2. **Agent Loop**: The NewsAgent runs a loop that checks for tool calls and executes them
 3. **Decision Points**: The system makes decisions based on tool call availability and type
 4. **Tool Execution**: Different tools handle specific tasks (fetching news, generating scripts, etc.)
-5. **External Services**: Integration with ElevenLabs for voice, Mistral AI for text, and Exa for search
-6. **Final Processing**: After completing all tool calls, the system generates video if audio exists
-7. **Cloud Storage**: Media files are stored in Google Cloud Storage and served to the UI
+5. **State Management**: Results from each tool call are stored in the agent's state
+6. **External APIs**: The system integrates with ElevenLabs, Mistral AI, and Exa for various services
+7. **Final Processing**: After completing all tool calls, the system generates video if audio exists
+8. **Cloud Infrastructure**: Everything runs on Google Cloud Run with media stored in Google Cloud Storage
 
 ## 🛠️ Tech Stack
 
