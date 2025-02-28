@@ -20,6 +20,19 @@ https://github.com/rajkstats/agentic-news/assets/demo/sonicpress_news.mp4
 - **Modern Web Interface**: Streamlit-based UI with NYTimes-inspired styling
 - **Cloud-Ready**: Optimized for Google Cloud Run deployment
 
+## System Architecture
+
+![SonicPress System Architecture](flow_chart_sonic_press.png)
+
+The diagram above illustrates the flow of the SonicPress system:
+1. User preferences are collected
+2. News content is fetched and processed through Exa API and LiteLLM
+3. A news script is generated
+4. Audio is created via ElevenLabs
+5. Video is generated using MoviePy and FFmpeg
+6. Content is uploaded to Google Cloud Storage
+7. The entire process is orchestrated by the NewsAgent
+
 ## 🛠️ Tech Stack
 
 - **Core**: Python 3.11+, Poetry
