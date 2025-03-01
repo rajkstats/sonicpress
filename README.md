@@ -557,11 +557,8 @@ Built for the ElevenLabs x a16z AI Agents Hackathon 2025, focusing on:
 - Real-world Applications
 
 ##  Acknowledgments
-
-- ElevenLabs for voice synthesis technology
-- a16z for hackathon organization
-- Mistral AI for language processing
 - Exa for news search API
+- Mistral AI for language processing
 - Google Cloud Platform for infrastructure 
 
 ## 👨‍💻 Contributors
