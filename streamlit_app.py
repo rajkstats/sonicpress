@@ -574,10 +574,10 @@ if "show_video" in st.session_state and st.session_state.show_video:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown('<div style="padding: 0; text-align: center;">', unsafe_allow_html=True)
-                    st.download_button(
+            st.download_button(
                 label="DOWNLOAD VIDEO",
-                        data=open(video_path, "rb"),
-                        file_name="sonicpress_news.mp4",
+                data=open(video_path, "rb"),
+                file_name="sonicpress_news.mp4",
                 mime="video/mp4",
                 use_container_width=True
             )
@@ -713,7 +713,7 @@ if compile_button:
             # Force a rerun to display the video at the top
             st.rerun()
 
-    except Exception as e:
+        except Exception as e:
             progress_container.error(f"Something went wrong: {e}")
 
 # Display Headlines & Highlights when summaries exist
